@@ -1,59 +1,73 @@
-// UdpAlici.java (Güncellenmiş)
+// UdpAlici.java (NIO - DatagramChannel versiyonu)
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.SocketException;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.net.StandardSocketOptions;
+import java.nio.ByteBuffer;
+import java.nio.channels.DatagramChannel;
 import java.nio.charset.StandardCharsets;
 
 public class UdpAlici {
 
     public static void main(String[] args) {
         final int PORT = 9999;
-        final int BUFFER_SIZE = 1024;
+        final int BUFFER_SIZE = 1024; // Buffer boyutu artırılabilir (örn: 8192)
 
-        try (DatagramSocket socket = new DatagramSocket(PORT)) {
-            System.out.println("[*] " + socket.getLocalSocketAddress() + " adresinde dinleme baslatildi...");
+        // try-with-resources ile kanalın otomatik kapanmasını sağlıyoruz.
+        try (DatagramChannel channel = DatagramChannel.open()) {
 
-            byte[] buffer = new byte[BUFFER_SIZE];
-            DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+            // 1. ADIM: Soket seçeneğini ayarla (bind işleminden önce)
+            channel.setOption(StandardSocketOptions.SO_REUSEADDR, true);
 
-            // 1. ADIM: Dosya adı paketini al
-            socket.receive(packet);
-            int filenameLength = packet.getLength();
-            String receivedFilename = new String(packet.getData(), 0, filenameLength, StandardCharsets.UTF_8);
+            // 2. ADIM: Kanalı belirtilen porta bağla
+            channel.bind(new InetSocketAddress(PORT));
 
+            System.out.println("[*] " + channel.getLocalAddress() + " adresinde dinleme baslatildi...");
+
+            // Veri alışverişi için ByteBuffer oluştur
+            ByteBuffer buffer = ByteBuffer.allocate(BUFFER_SIZE);
+
+            // 3. ADIM: Dosya adı paketini al
+            // receive() metodu gönderenin adresini döndürür.
+            channel.receive(buffer);
+
+            // Buffer'ı okuma moduna al (limit'i mevcut pozisyona ayarlar, pozisyonu 0 yapar)
+            buffer.flip();
+
+            // Gelen veriyi String'e çevir
+            String receivedFilename = StandardCharsets.UTF_8.decode(buffer).toString();
             System.out.println("[+] Gelen dosya adi: " + receivedFilename);
 
-            // 2. ADIM: Dosyayı gelen isimle yazmaya başla
+            // 4. ADIM: Dosya içeriğini al ve yaz
             try (FileOutputStream fos = new FileOutputStream(receivedFilename)) {
-
                 while (true) {
-                    // Veri paketini al
-                    socket.receive(packet);
-                    int dataLength = packet.getLength();
-                    String senderAddress = packet.getAddress().getHostAddress();
+                    // Buffer'ı bir sonraki yazma işlemi için temizle
+                    buffer.clear();
+                    SocketAddress senderAddress = channel.receive(buffer);
 
-                    // Eğer gelen paketin boyutu 0 ise, transferin bittiği anlamına gelir.
+                    // Buffer'ı okuma moduna al
+                    buffer.flip();
+
+                    int dataLength = buffer.remaining(); // Alınan veri boyutu
+
                     if (dataLength == 0) {
                         System.out.println("[-] Veri akisi sonlandi. Dosya alimi tamamlandi.");
                         break;
                     }
 
-                    // Gelen veriyi (sadece dolu olan kısmı) dosyaya yaz
-                    fos.write(packet.getData(), 0, dataLength);
+                    // Buffer'daki veriyi dosyaya yazmak için bir byte dizisine aktar
+                    byte[] data = new byte[dataLength];
+                    buffer.get(data);
+                    fos.write(data);
 
                     System.out.println("[+] " + senderAddress + " adresinden " + dataLength + " byte'lik veri alindi.");
                 }
-
                 System.out.println("[*] '" + receivedFilename + "' basariyla kaydedildi.");
             }
 
-        } catch (SocketException e) {
-            System.err.println("Soket hatasi: " + e.getMessage());
-            e.printStackTrace();
         } catch (IOException e) {
-            System.err.println("Dosya I/O hatasi: " + e.getMessage());
+            System.err.println("NIO Hatasi: " + e.getMessage());
             e.printStackTrace();
         } finally {
             System.out.println("[*] Islem sonlandi.");
