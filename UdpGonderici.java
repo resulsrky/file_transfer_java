@@ -1,21 +1,21 @@
-// UdpGonderici.java (Handshake Versiyonu)
+// UdpGonderici.java (ProtocolFamily ile IPv4 Belirtme)
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.SocketTimeoutException;
+import java.net.StandardProtocolFamily; // EKLENDİ
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 
 public class UdpGonderici {
-
     private static final int DATA_SIZE = 1024;
     private static final int BUFFER_SIZE = 1028;
 
     public static void main(String[] args) {
-        System.setProperty("java.net.preferIPv4Stack", "true");
+        // System.setProperty satırı KALDIRILDI.
         if (args.length < 2) {
             System.err.println("Kullanim: java UdpGonderici <hedef_ip_adresi> <dosya_yolu>");
             return;
@@ -23,24 +23,21 @@ public class UdpGonderici {
         String hostIp = args[0];
         String filePath = args[1];
         final int PORT = 9999;
-
         File file = new File(filePath);
         if (!file.exists()) {
             System.err.println("Hata: " + filePath + " dosyasi bulunamadi.");
             return;
         }
-
         System.out.println("[*] Hedef: " + hostIp + ":" + PORT);
         System.out.println("[*] Gonderilecek dosya: " + file.getName() + " (" + file.length() + " bytes)");
 
-        try (DatagramChannel channel = DatagramChannel.open();
+        // DEĞİŞİKLİK: Kanal açılırken IPv4 (INET) ailesi belirtildi.
+        try (DatagramChannel channel = DatagramChannel.open(StandardProtocolFamily.INET);
              FileInputStream fis = new FileInputStream(file);
              FileChannel fileChannel = fis.getChannel()) {
 
-            channel.socket().setSoTimeout(5000); // Tüm bekleme işlemleri için 5 saniye timeout
+            channel.socket().setSoTimeout(5000);
             InetSocketAddress targetAddress = new InetSocketAddress(hostIp, PORT);
-
-            // 1. ADIM: HANDSHAKE - Transfer talebi gönder (REQ) ve onayı bekle (ACK_REQ)
             long totalPackets = (long) Math.ceil((double) file.length() / DATA_SIZE);
             if (file.length() == 0) totalPackets = 1;
 
@@ -49,7 +46,7 @@ public class UdpGonderici {
             ByteBuffer ackBuffer = ByteBuffer.allocate(64);
 
             boolean ackReceived = false;
-            for (int i = 0; i < 3; i++) { // Onay için 3 deneme hakkı
+            for (int i = 0; i < 3; i++) {
                 System.out.println("[*] Transfer talebi gonderiliyor (Deneme " + (i + 1) + "/3)...");
                 channel.send(requestBuffer.rewind(), targetAddress);
                 try {
@@ -65,16 +62,12 @@ public class UdpGonderici {
                     System.err.println("[!] Onay bekleme zamani doldu.");
                 }
             }
-
             if (!ackReceived) {
                 System.err.println("[!] Alicidan onay alinamadi. Islem iptal edildi.");
                 return;
             }
-
-            // 2. ADIM: VERİ TRANSFERİ
             int sequenceNumber = 0;
             ByteBuffer dataBuffer = ByteBuffer.allocate(BUFFER_SIZE);
-
             while (true) {
                 dataBuffer.clear();
                 dataBuffer.putInt(sequenceNumber);
@@ -86,14 +79,11 @@ public class UdpGonderici {
                 channel.send(dataBuffer, targetAddress);
                 System.out.print("\r[+] Gonderilen paket sayisi: " + (sequenceNumber + 1) + "/" + totalPackets);
                 sequenceNumber++;
-
                 if (file.length() == 0) break;
             }
             System.out.println("\n[*] Tum paketler gonderildi.");
-
-            // 3. ADIM: BİTİŞ - Nihai sonucu bekle (FIN_SUCCESS/FIN_FAILURE)
             System.out.println("[*] Alicidan nihai sonuc bekleniyor (30 saniye zaman asimi)...");
-            channel.socket().setSoTimeout(30000); // Dosya yazma işlemi uzun sürebilir
+            channel.socket().setSoTimeout(30000);
             ByteBuffer finalResponseBuffer = ByteBuffer.allocate(1024);
 
             try {
@@ -106,7 +96,6 @@ public class UdpGonderici {
             } catch (SocketTimeoutException e) {
                 System.err.println("\n[!] Hata: Alicidan nihai sonuc alinamadi. Transfer basarisiz olmus olabilir.");
             }
-
         } catch (IOException e) {
             e.printStackTrace();
         }
